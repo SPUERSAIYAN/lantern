@@ -48,7 +48,6 @@ public class AuthenticationManager implements AutoCloseable {
     private final EnvironmentContext environmentContext;
     private final AuthenticationPolicyService policyService;
     private final Long systemId;
-    private final InjvmAuthenticationServices injvmAuthenticationServices;
     private LocalAuthenticationService localAuthenticationService;
 
     @Getter
@@ -67,9 +66,7 @@ public class AuthenticationManager implements AutoCloseable {
                 "Lantern tokenSpot must be header or cookie");
         Assert.hasText(flowConfig.getTokenName(), "Lantern tokenName is required");
         this.lanternAuthFlow = new LanternAuthFlow(flowConfig);
-        String dubboLocalServiceName = authenticationConfig.getDubboLocalServiceName();
-        boolean useInjvm = StringUtils.hasText(dubboLocalServiceName);
-        if (useInjvm || StringUtils.hasText(flowConfig.getPolicyServiceName())) {
+        if (StringUtils.hasText(flowConfig.getPolicyServiceName())) {
             Assert.hasText(flowConfig.getSystemId(), "Lantern systemId is required with a policy service");
             this.systemId = Long.valueOf(flowConfig.getSystemId());
             Assert.isTrue(systemId > 0, "Lantern systemId must be positive");
@@ -80,27 +77,11 @@ public class AuthenticationManager implements AutoCloseable {
             Assert.notNull(authenticationConfig.getAuthenticationType(), "Lantern authenticationType is required without a policy service");
             this.systemId = null;
         }
-        if (useInjvm) {
-            Assert.isTrue(!StringUtils.hasText(flowConfig.getPolicyServiceName())
-                    && authenticationConfig.getDefaultAuthenticationService() == null
-                    && authenticationConfig.getAuthenticationServiceConfig() == null
-                    && authenticationConfig.getUserInfoAuthenticationServiceConfig() == null,
-                    "Lantern dubboLocalServiceName cannot be combined with other authentication or policy services");
-            Object implementation = environmentContext.getBean(dubboLocalServiceName);
-            Assert.isInstanceOf(AuthenticationService.class, implementation, "Lantern Dubbo local bean must implement AuthenticationService");
-            Assert.isInstanceOf(AuthenticationPolicyService.class, implementation, "Lantern Dubbo local bean must implement AuthenticationPolicyService");
-            this.injvmAuthenticationServices = new InjvmAuthenticationServices(
-                    (AuthenticationService) implementation, (AuthenticationPolicyService) implementation);
-            this.authenticationService = injvmAuthenticationServices.getAuthenticationService();
-            this.policyService = injvmAuthenticationServices.getPolicyService();
-        } else {
-            this.injvmAuthenticationServices = null;
-            this.policyService = systemId == null ? null
-                    : (AuthenticationPolicyService) environmentContext.getBean(flowConfig.getPolicyServiceName());
-            this.initAuthenticationService();
-            if (this.localAuthenticationService != null) {
-                this.startCacheSync();
-            }
+        this.policyService = systemId == null ? null
+                : (AuthenticationPolicyService) environmentContext.getBean(flowConfig.getPolicyServiceName());
+        this.initAuthenticationService();
+        if (this.localAuthenticationService != null) {
+            this.startCacheSync();
         }
     }
 
@@ -263,9 +244,6 @@ public class AuthenticationManager implements AutoCloseable {
 
     @Override
     public void close() {
-        if (injvmAuthenticationServices != null) {
-            injvmAuthenticationServices.close();
-        }
         if (scheduledThreadPoolExecutor != null) {
             scheduledThreadPoolExecutor.shutdownNow();
         }
